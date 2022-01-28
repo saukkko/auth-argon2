@@ -1,4 +1,9 @@
+.idea/
+.vscode/
+cmake-build-debug/
 bin/
 obj/
+old/
 creds.txt
 login.txt
+CMakeLists.txt

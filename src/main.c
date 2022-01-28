@@ -3,6 +3,12 @@
 #include <stdlib.h>
 #include <string.h>
 
+/* TODO:
+ *  get rid of all unnecessary declarative arrays and malloc() some amount of memory to them instead
+ *  create more functions
+ *  create auth-argon2.h
+ */
+
 void print_usage()
 {
     printf("Usage: auth-argon2 FILE1... FILE2... [OPTIONS]...\n");
@@ -39,7 +45,7 @@ char* read_file(const char *filename)
     fp = fopen(filename, "r");
     if (fp == NULL)
     {
-        fprintf(stderr, "Error: opening file \"%s\" (does it exist?)\n", filename);
+        fprintf(stderr, "Error: Return value was %s when opening file \"%s\" (does it exist?)\n", fp, filename);
         exit(1);
     }
 
@@ -54,7 +60,7 @@ char* read_file(const char *filename)
     buf = malloc(size+1);
     memset(buf, 0x00, size+1);
 
-    uint64_t bytes_read = fread(buf, 1, size+5, fp);
+    uint64_t bytes_read = fread(buf, 1, size, fp);
 
     if (bytes_read == 0) {
         fprintf(stderr, "Error: File was empty when it shouldn't be\n");
@@ -64,7 +70,7 @@ char* read_file(const char *filename)
 
     if (bytes_read != size)
     {
-        fprintf(stderr, "Error: Detected file size of %ld bytes_read but could read only %lu bytes. (is your EOL char LF or CRLF?)\n", size, bytes_read);
+        fprintf(stderr, "Error: Detected file size of %li but could read only %lu bytes. (is your EOL char LF or CRLF?)\n", size, bytes_read);
         fclose(fp);
         exit(1);
     }
@@ -77,11 +83,11 @@ char* read_file(const char *filename)
 int main(int argc, char **argv)
 {
 #ifdef DEV
-    fprintf(stderr, "Warning: You are running development build which is not intended for normal use.\n");
+    fprintf(stderr, "Warning: You are running development build which is not intended for normal use. Consider un-defining DEV\n");
 #endif
-    if (argc > 4)
+    if (argc - 1 > 3)
     {
-        fprintf(stderr, "Error: Maximum number of arguments that make any sense is 3. Try --help or -h options.\n");
+        fprintf(stderr, "Error: Maximum number of extra arguments that make any sense is 3. Try --help or -h options.\n");
         exit(1);
     }
     char *help_str = "--help";
@@ -99,7 +105,8 @@ int main(int argc, char **argv)
     char *filename1;
     char *filename2;
 
-    if (argc < 3)
+    // require at least two arguments
+    if (argc - 1 < 2)
     {
 #ifdef DEV
         /* NOTE: Hard coded filenames are provided here, if we are running DEV build and either isn't provided */
@@ -113,7 +120,7 @@ int main(int argc, char **argv)
         strcpy(filename2, "login.txt");
         printf("*** Using %s as file2\n", filename2);
 #else
-        fprintf(stderr, "Error: Need 2 arguments but only %d provided.\n", argc-1);
+        fprintf(stderr, "Error: Need 2 arguments but only %i provided.\n", argc-1);
         return 1;
 #endif
     } else
@@ -178,7 +185,7 @@ int main(int argc, char **argv)
     char *enc = NULL;
 
 
-    // TODO: these two loops could be improved.
+    // TODO: these two loops could be improved and possibly merged.
     ptr = strtok(credentials, "\n");
     int i=0;
     while (rowcount--) {
@@ -193,7 +200,7 @@ int main(int argc, char **argv)
 
         if (ptr == NULL)
         {
-            fprintf(stderr, "Warning: Encountered empty row, ignoring it...\n");
+            printf("Info: Encountered empty line on row %i, ignoring it...\n", i+1);
             continue;
         }
 
@@ -213,10 +220,39 @@ int main(int argc, char **argv)
         exit(1);
     }
 
+    /** detect correct type from enc string ($argon<i|d|id>$opts..$salt..$hash..) **/
+    // strtok() mutates the original value, so we copy the encoded string to new array.
+    // chars between the first and second $ is the argon2 type
+    char *p = strtok(ptr, "$"); // this is either argon2i, argon2d or argon2id.
+
+    char argon2_type_str[strlen(p)];
+    strcpy(argon2_type_str, p);
+    memset(&p[sizeof(argon2_type_str)], 0x24, 1);
+
+    argon2_type argon2type;
+    if (strcmp(argon2_type_str, argon2_type2string(Argon2_i, 0)) == 0)
+    {
+        argon2type = Argon2_i;
+    }
+    else if (strcmp(argon2_type_str, argon2_type2string(Argon2_d, 0)) == 0)
+    {
+        argon2type = Argon2_d;
+    }
+    else if (strcmp(argon2_type_str, argon2_type2string(Argon2_id, 0)) == 0)
+    {
+        argon2type = Argon2_id;
+    }
+    else
+    {
+        fprintf(stderr, "Error: Could not interpret argon2 type from encoded string\n");
+        return 1;
+    }
+
     /** verify the hash by re-calculating the hash with provided plaintext and
      * compare them to those stored in local machine **/
+
     FILE *stream = stdout;
-    int verify_result = argon2i_verify(enc, plaintext, plaintext_len);
+    int verify_result  = argon2_verify(enc,plaintext,plaintext_len,argon2type);
     if (verify_result != ARGON2_OK)
         stream = stderr;
     fprintf(stream, "Verifying \"%s\": %s\n", username, argon2_error_message(verify_result));
